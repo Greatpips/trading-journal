@@ -10,25 +10,59 @@ import DayDetailsModal from '@/components/DayDetailsModal';
 import PerformanceChart from '@/components/PerformanceChart';
 import { Plus, Wallet, TrendingUp, Percent, DollarSign, Activity, LogOut, Trash2, FolderPlus, Briefcase, Menu, X } from 'lucide-react';
 
+interface Trade {
+  id: string;
+  user_id: string;
+  account_id: string;
+  asset: string;
+  type: string;
+  trend: string;
+  zone_timeframe: string;
+  zone_type: string;
+  risk_percentage: number;
+  session: string;
+  entry_price?: number;
+  exit_price?: number;
+  sl_price?: number;
+  tp_price?: number;
+  duration?: string;
+  pnl: number;
+  thoughts?: string;
+  date: string;
+}
+
+interface TradingAccount {
+  id: string;
+  user_id: string;
+  name: string;
+  initial_balance: number;
+  created_at?: string;
+}
+
+interface AuthUser {
+  id: string;
+  email?: string;
+}
+
 export default function Dashboard() {
-  const [user, setUser] = useState(null);
-  const [authChecking, setAuthChecking] = useState(true);
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [authChecking, setAuthChecking] = useState<boolean>(true);
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   
   // Accounts state
-  const [accounts, setAccounts] = useState([]);
-  const [activeAccount, setActiveAccount] = useState(null);
-  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
-  const [newAccountName, setNewAccountName] = useState('');
-  const [newAccountBalance, setNewAccountBalance] = useState('10000');
+  const [accounts, setAccounts] = useState<TradingAccount[]>([]);
+  const [activeAccount, setActiveAccount] = useState<TradingAccount | null>(null);
+  const [isCreatingAccount, setIsCreatingAccount] = useState<boolean>(false);
+  const [newAccountName, setNewAccountName] = useState<string>('');
+  const [newAccountBalance, setNewAccountBalance] = useState<string>('10000');
 
   // Trade modals & data
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalInitialDate, setModalInitialDate] = useState(null); // Tracks pre-selected date for manual additions
-  const [selectedDateFilter, setSelectedDateFilter] = useState(null);
-  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [trades, setTrades] = useState([]);
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [modalInitialDate, setModalInitialDate] = useState<string | null>(null);
+  const [selectedDateFilter, setSelectedDateFilter] = useState<string | null>(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState<boolean>(false);
+  const [trades, setTrades] = useState<Trade[]>([]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -72,12 +106,14 @@ export default function Dashboard() {
       } else {
         await createDefaultAccount();
       }
-    } catch (error) {
-      console.error('Error fetching accounts:', error.message);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error fetching accounts:', errorMessage);
     }
   };
 
   const createDefaultAccount = async () => {
+    if (!user) return;
     try {
       const { data, error } = await supabase
         .from('accounts')
@@ -89,14 +125,15 @@ export default function Dashboard() {
         setAccounts(data);
         setActiveAccount(data[0]);
       }
-    } catch (error) {
-      console.error('Error creating default account:', error.message);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error creating default account:', errorMessage);
     }
   };
 
-  const handleCreateAccount = async (e) => {
+  const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newAccountName.trim()) return;
+    if (!newAccountName.trim() || !user) return;
 
     try {
       const { data, error } = await supabase
@@ -116,12 +153,13 @@ export default function Dashboard() {
         setNewAccountBalance('10000');
         setIsCreatingAccount(false);
       }
-    } catch (error) {
-      console.error('Error creating account:', error.message);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error creating account:', errorMessage);
     }
   };
 
-  const handleDeleteAccount = async (accountId, e) => {
+  const handleDeleteAccount = async (accountId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (accounts.length <= 1) {
       alert('You must keep at least one active account.');
@@ -138,12 +176,13 @@ export default function Dashboard() {
       if (activeAccount?.id === accountId) {
         setActiveAccount(updatedAccounts[0]);
       }
-    } catch (error) {
-      console.error('Error deleting account:', error.message);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error deleting account:', errorMessage);
     }
   };
 
-  const fetchTrades = async (accountId) => {
+  const fetchTrades = async (accountId: string) => {
     try {
       const { data, error } = await supabase
         .from('trades')
@@ -153,13 +192,14 @@ export default function Dashboard() {
 
       if (error) throw error;
       setTrades(data || []);
-    } catch (error) {
-      console.error('Error fetching trades:', error.message);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error fetching trades:', errorMessage);
     }
   };
 
-  const handleAddTrade = async (newTrade) => {
-    if (!activeAccount) return;
+  const handleAddTrade = async (newTrade: any) => {
+    if (!activeAccount || !user) return;
     try {
       const payload = {
         user_id: user.id,
@@ -188,23 +228,25 @@ export default function Dashboard() {
 
       if (error) throw error;
       if (data) {
-        setTrades(prevTrades => 
+        setTrades((prevTrades: Trade[]) => 
           [...prevTrades, data[0]].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
         );
       }
-    } catch (error) {
-      console.error('Error adding trade:', error.message);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error adding trade:', errorMessage);
     }
   };
 
-  const handleDeleteTrade = async (id) => {
+  const handleDeleteTrade = async (id: string) => {
     try {
       const { error } = await supabase.from('trades').delete().eq('id', id);
       if (error) throw error;
       setTrades(trades.filter(t => t.id !== id));
-    } catch (error) {
-      console.error('Error deleting trade:', error.message);
-      alert('Delete failed: ' + error.message);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error deleting trade:', errorMessage);
+      alert('Delete failed: ' + errorMessage);
     }
   };
 
@@ -215,7 +257,7 @@ export default function Dashboard() {
     setAccounts([]);
   };
 
-  const handleOpenAddTradeForDate = (dateStr) => {
+  const handleOpenAddTradeForDate = (dateStr: string) => {
     setModalInitialDate(dateStr);
     setIsModalOpen(true);
   };
@@ -225,7 +267,7 @@ export default function Dashboard() {
   }
 
   if (!user) {
-    return <AuthModal onAuthSuccess={(authUser) => setUser(authUser)} />;
+    return <AuthModal onAuthSuccess={(authUser: AuthUser) => setUser(authUser)} />;
   }
 
   const initialBalance = activeAccount ? Number(activeAccount.initial_balance) : 10000;
@@ -233,7 +275,7 @@ export default function Dashboard() {
   const currentAccountBalance = initialBalance + totalNetPnl;
   const winningTrades = trades.filter(t => Number(t.pnl) > 0);
   const losingTrades = trades.filter(t => Number(t.pnl) < 0);
-  const winRate = trades.length > 0 ? ((winningTrades.length / trades.length) * 100).toFixed(1) : 0;
+  const winRate = trades.length > 0 ? ((winningTrades.length / trades.length) * 100).toFixed(1) : '0';
   
   const grossProfit = winningTrades.reduce((acc, t) => acc + Number(t.pnl), 0);
   const grossLoss = Math.abs(losingTrades.reduce((acc, t) => acc + Number(t.pnl), 0));
@@ -246,7 +288,7 @@ export default function Dashboard() {
           <div className="w-9 h-9 rounded-xl bg-slate-900 text-white flex items-center justify-center font-bold">AJ</div>
           <div>
             <h2 className="text-xs font-bold text-slate-900">Apex Journal</h2>
-            <p className="text-[10px] text-slate-400 truncate max-w-[120px]">{user.email}</p>
+            <p className="text-[10px] text-slate-400 truncate max-w-[120px]">{user?.email}</p>
           </div>
         </div>
         <button 
@@ -370,7 +412,7 @@ export default function Dashboard() {
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <button
               onClick={() => {
-                setModalInitialDate(null); // Clear any prefilled date for standard global add
+                setModalInitialDate(null);
                 setIsModalOpen(true);
               }}
               className="bg-slate-900 hover:bg-slate-800 text-white px-3.5 sm:px-4 py-2 rounded-xl text-xs font-semibold transition-all shadow-sm active:scale-95 flex items-center gap-1.5 sm:gap-2"
@@ -460,12 +502,12 @@ export default function Dashboard() {
           {activeTab === 'dashboard' && (
             <div className="space-y-6">
               <PerformanceChart trades={trades} initialBalance={initialBalance} />
-              <PnlCalendar trades={trades} onSelectDay={(dateStr) => { setSelectedDateFilter(dateStr); setIsDetailModalOpen(true); }} />
+              <PnlCalendar trades={trades} onSelectDay={(dateStr: string) => { setSelectedDateFilter(dateStr); setIsDetailModalOpen(true); }} />
             </div>
           )}
 
           {activeTab === 'calendar' && (
-            <PnlCalendar trades={trades} onSelectDay={(dateStr) => { setSelectedDateFilter(dateStr); setIsDetailModalOpen(true); }} />
+            <PnlCalendar trades={trades} onSelectDay={(dateStr: string) => { setSelectedDateFilter(dateStr); setIsDetailModalOpen(true); }} />
           )}
 
           {activeTab === 'analytics' && (
