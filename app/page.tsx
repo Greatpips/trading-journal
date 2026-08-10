@@ -80,13 +80,22 @@ export default function Dashboard() {
   const [trades, setTrades] = useState<Trade[]>([]);
 
   useEffect(() => {
+    // Prevent locking user out if they arrived via a password reset link hash
+    if (typeof window !== 'undefined' && window.location.hash.includes('type=recovery')) {
+      setAuthChecking(false);
+      return;
+    }
+
     // Bulletproof session check on load
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user || null);
       setAuthChecking(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        return;
+      }
       setUser(session?.user || null);
       setAuthChecking(false);
     });
