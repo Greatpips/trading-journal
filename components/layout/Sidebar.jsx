@@ -7,7 +7,8 @@ import {
   Plus, 
   Trash2, 
   Calculator,
-  Compass
+  Compass,
+  CheckSquare
 } from 'lucide-react';
 
 export default function Sidebar({
@@ -34,15 +35,16 @@ export default function Sidebar({
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'calculator', label: 'Pip Calculator', icon: Calculator },
     { id: 'profile', label: 'Trader Profile', icon: Compass },
+    { id: 'rules', label: 'Trading Rules', icon: CheckSquare },
     { id: 'journal', label: 'Playbook Journal', icon: BookOpen },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
   return (
-    <aside className="w-72 bg-white border-r border-slate-200/85 flex flex-col h-screen sticky top-0 shrink-0 hidden md:flex">
+    <aside className="w-72 bg-white border-r border-slate-200/85 flex flex-col h-full min-h-screen md:h-screen md:sticky md:top-0 shrink-0">
       
       {/* Brand Header */}
-      <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+      <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-slate-900 text-white flex items-center justify-center font-bold tracking-wider text-sm shadow-sm">
             GP

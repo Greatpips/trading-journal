@@ -14,11 +14,21 @@ import MetricCardsGrid from '@/components/dashboard/MetricCardsGrid';
 import AnalyticsView from '@/components/dashboard/AnalyticsView';
 import PipsCalculator from '@/components/tools/PipsCalculator';
 import TraderProfileView from '@/components/tools/TraderProfileView';
+import TradingRulesView from '@/components/tools/TradingRulesView';
 
 interface CustomItem {
   id: string;
   name: string;
   desc: string;
+}
+
+interface TradeRuleEvaluation {
+  id: string;
+  trade_id: string;
+  rule_id: string;
+  rule_text: string;
+  passed: boolean;
+  break_reason: string;
 }
 
 interface Trade {
@@ -40,6 +50,7 @@ interface Trade {
   pnl: number;
   thoughts?: string;
   date: string;
+  trade_rules_evaluation?: TradeRuleEvaluation[];
 }
 
 interface TradingAccount {
@@ -80,13 +91,11 @@ export default function Dashboard() {
   const [trades, setTrades] = useState<Trade[]>([]);
 
   useEffect(() => {
-    // Prevent locking user out if they arrived via a password reset link hash
     if (typeof window !== 'undefined' && window.location.hash.includes('type=recovery')) {
       setAuthChecking(false);
       return;
     }
 
-    // Bulletproof session check on load
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user || null);
       setAuthChecking(false);
@@ -225,7 +234,17 @@ export default function Dashboard() {
     try {
       const { data, error } = await supabase
         .from('trades')
-        .select('*')
+        .select(`
+          *,
+          trade_rules_evaluation (
+            id,
+            trade_id,
+            rule_id,
+            rule_text,
+            passed,
+            break_reason
+          )
+        `)
         .eq('account_id', accountId)
         .order('date', { ascending: true }); 
 
@@ -239,39 +258,93 @@ export default function Dashboard() {
   const handleAddTrade = async (newTrade: any) => {
     if (!activeAccount || !user) return;
     try {
+      const { ruleEvaluations, ...tradeFormData } = newTrade;
+
       const payload = {
         user_id: user.id,
         account_id: activeAccount.id,
-        asset: newTrade.asset,
-        type: newTrade.type,
-        trend: newTrade.trend,
-        zone_timeframe: newTrade.zoneTimeframe,
-        zone_type: newTrade.zoneType,
-        risk_percentage: Number(newTrade.riskPercentage),
-        session: newTrade.session,
-        entry_price: Number(newTrade.entryPrice),
-        exit_price: Number(newTrade.exitPrice),
-        sl_price: Number(newTrade.slPrice),
-        tp_price: Number(newTrade.tpPrice),
-        duration: newTrade.duration,
-        pnl: Number(newTrade.pnl),
-        thoughts: newTrade.thoughts,
-        date: newTrade.date,
+        asset: tradeFormData.asset,
+        type: tradeFormData.type,
+        trend: tradeFormData.trend,
+        zone_timeframe: tradeFormData.zoneTimeframe,
+        zone_type: tradeFormData.zoneType,
+        risk_percentage: Number(tradeFormData.riskPercentage),
+        session: tradeFormData.session,
+        entry_price: tradeFormData.entryPrice ? Number(tradeFormData.entryPrice) : null,
+        exit_price: tradeFormData.exitPrice ? Number(tradeFormData.exitPrice) : null,
+        sl_price: tradeFormData.slPrice ? Number(tradeFormData.slPrice) : null,
+        tp_price: tradeFormData.tpPrice ? Number(tradeFormData.tpPrice) : null,
+        duration: tradeFormData.duration,
+        pnl: Number(tradeFormData.pnl),
+        thoughts: tradeFormData.thoughts,
+        date: tradeFormData.date,
       };
 
-      const { data, error } = await supabase
+      // 1. Insert core trade record
+      const { data: insertedTrade, error: tradeError } = await supabase
         .from('trades')
         .insert([payload])
-        .select();
+        .select(`
+          *,
+          trade_rules_evaluation (
+            id,
+            trade_id,
+            rule_id,
+            rule_text,
+            passed,
+            break_reason
+          )
+        `)
+        .single();
 
-      if (error) throw error;
-      if (data) {
+      if (tradeError) throw tradeError;
+
+      // 2. Insert rule evaluations if present
+      if (ruleEvaluations && ruleEvaluations.length > 0 && insertedTrade) {
+        const evaluationsPayload = ruleEvaluations.map((evalItem: any) => ({
+          trade_id: insertedTrade.id,
+          rule_id: evalItem.rule_id,
+          rule_text: evalItem.rule_text,
+          passed: evalItem.passed,
+          break_reason: evalItem.break_reason,
+        }));
+
+        const { error: evalError } = await supabase
+          .from('trade_rules_evaluation')
+          .insert(evaluationsPayload);
+
+        if (evalError) throw evalError;
+
+        // Re-fetch or manually attach evaluations to state item
+        const { data: refreshedTrade } = await supabase
+          .from('trades')
+          .select(`
+            *,
+            trade_rules_evaluation (
+              id,
+              trade_id,
+              rule_id,
+              rule_text,
+              passed,
+              break_reason
+            )
+          `)
+          .eq('id', insertedTrade.id)
+          .single();
+
+        if (refreshedTrade) {
+          setTrades((prevTrades: Trade[]) => 
+            [...prevTrades, refreshedTrade].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+          );
+        }
+      } else if (insertedTrade) {
         setTrades((prevTrades: Trade[]) => 
-          [...prevTrades, data[0]].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+          [...prevTrades, insertedTrade].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
         );
       }
     } catch (error: unknown) {
       console.error('Error adding trade:', error);
+      alert('Failed to save execution record.');
     }
   };
 
@@ -338,19 +411,27 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F5F5F7] text-slate-900 font-sans flex overflow-x-hidden">
+    <div className="min-h-screen bg-[#F5F5F7] text-slate-900 font-sans flex w-full overflow-x-hidden">
       
-      <Sidebar {...sidebarProps} />
+      {/* Desktop Sidebar */}
+      <div className="hidden md:block shrink-0">
+        <Sidebar {...sidebarProps} />
+      </div>
 
+      {/* Mobile Sidebar Overlay Drawer */}
       {isMobileMenuOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex md:hidden">
-          <div className="w-72 bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-left duration-200">
+        <div className="fixed inset-0 z-50 flex md:hidden">
+          <div 
+            className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity" 
+            onClick={() => setIsMobileMenuOpen(false)} 
+          />
+          <div className="relative w-72 bg-white h-full shadow-2xl flex flex-col z-10 animate-in slide-in-from-left duration-200">
             <Sidebar {...sidebarProps} />
           </div>
-          <div className="flex-1" onClick={() => setIsMobileMenuOpen(false)} />
         </div>
       )}
 
+      {/* Main Container */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
         
         <Header 
@@ -362,7 +443,7 @@ export default function Dashboard() {
           handleSignOut={handleSignOut} 
         />
 
-        <main className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl w-full mx-auto">
+        <main className="p-3 sm:p-5 lg:p-8 space-y-4 sm:space-y-6 max-w-7xl w-full mx-auto box-border">
           
           <AccountBalanceBanner 
             currentAccountBalance={currentAccountBalance} 
@@ -380,7 +461,7 @@ export default function Dashboard() {
           />
 
           {activeTab === 'dashboard' && (
-            <div className="space-y-6">
+            <div className="space-y-4 sm:space-y-6">
               <PerformanceChart trades={trades} initialBalance={initialBalance} />
               <PnlCalendar trades={trades} onSelectDay={(dateStr: string) => { setSelectedDateFilter(dateStr); setIsDetailModalOpen(true); }} />
             </div>
@@ -412,45 +493,77 @@ export default function Dashboard() {
             />
           )}
 
+          {activeTab === 'rules' && (
+            <TradingRulesView user={user} />
+          )}
+
           {activeTab === 'journal' && (
-            <div className="bg-white border border-slate-200/85 rounded-3xl p-6 sm:p-8 shadow-xs space-y-6">
+            <div className="bg-white border border-slate-200/85 rounded-2xl sm:rounded-3xl p-4 sm:p-8 shadow-xs space-y-4 sm:space-y-6">
               <div>
-                <h3 className="text-base font-semibold text-slate-900">Trading Playbook & Logged Thoughts</h3>
-                <p className="text-xs text-slate-500">Review notes for {activeAccount?.name}.</p>
+                <h3 className="text-sm sm:text-base font-semibold text-slate-900">Trading Playbook, Rules & Logged Thoughts</h3>
+                <p className="text-[11px] sm:text-xs text-slate-500">Review execution details and master discipline breakdown logs for {activeAccount?.name}.</p>
               </div>
 
               <div className="space-y-3">
                 {trades.length === 0 ? (
                   <p className="text-xs text-slate-400 py-8 text-center">No trade logs available for this account yet.</p>
                 ) : (
-                  [...trades].reverse().map((t) => (
-                    <div key={t.id} className="p-4 rounded-2xl border border-slate-200/70 bg-slate-50/50 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-900 truncate pr-2">{t.asset} ({t.type}) — {t.date}</span>
-                        <span className={`text-xs font-bold shrink-0 ${Number(t.pnl) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                          {Number(t.pnl) >= 0 ? `+$${t.pnl}` : `-$${Math.abs(t.pnl)}`}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-600">
-                        <strong className="text-slate-800">Setup:</strong> {t.zone_type} ({t.zone_timeframe}) • <strong className="text-slate-800">Session:</strong> {t.session}
-                      </p>
-                      {t.thoughts && (
-                        <p className="text-xs text-slate-700 bg-white p-3 rounded-xl border border-slate-200/60 mt-2">
-                          <strong className="text-slate-900 block mb-0.5">Thoughts:</strong> {t.thoughts}
+                  [...trades].reverse().map((t) => {
+                    const evaluations = t.trade_rules_evaluation || [];
+                    const brokenRules = evaluations.filter((e) => !e.passed);
+
+                    return (
+                      <div key={t.id} className="p-3.5 sm:p-4 rounded-2xl border border-slate-200/70 bg-slate-50/50 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-900 truncate pr-2">{t.asset} ({t.type}) — {t.date}</span>
+                          <span className={`text-xs font-bold shrink-0 ${Number(t.pnl) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {Number(t.pnl) >= 0 ? `+$${t.pnl}` : `-$${Math.abs(t.pnl)}`}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600">
+                          <strong className="text-slate-800">Setup:</strong> {t.zone_type} ({t.zone_timeframe}) • <strong className="text-slate-800">Session:</strong> {t.session} • <strong className="text-slate-800">Risk:</strong> {t.risk_percentage}%
                         </p>
-                      )}
-                    </div>
-                  ))
+
+                        {/* Rules Verification Display */}
+                        {evaluations.length > 0 && (
+                          <div className="pt-1 border-t border-slate-200/60 mt-2 space-y-1">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Master Rules Checklist:</span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                              {evaluations.map((ev) => (
+                                <div key={ev.id} className={`p-2 rounded-xl text-[11px] border ${ev.passed ? 'bg-emerald-50/50 border-emerald-200/70 text-emerald-900' : 'bg-rose-50/60 border-rose-200 text-rose-900'}`}>
+                                  <div className="font-semibold flex items-center justify-between">
+                                    <span>{ev.rule_text}</span>
+                                    <span>{ev.passed ? '✅ Followed' : '❌ Broken'}</span>
+                                  </div>
+                                  {!ev.passed && ev.break_reason && (
+                                    <p className="text-[10px] text-rose-700 mt-1 italic">
+                                      Reason: "{ev.break_reason}"
+                                    </p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {t.thoughts && (
+                          <p className="text-xs text-slate-700 bg-white p-3 rounded-xl border border-slate-200/60 mt-2">
+                            <strong className="text-slate-900 block mb-0.5">Thoughts & Psychology:</strong> {t.thoughts}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
           )}
 
           {activeTab === 'settings' && (
-            <div className="bg-white border border-slate-200/85 rounded-3xl p-6 sm:p-8 shadow-xs space-y-6 max-w-xl">
+            <div className="bg-white border border-slate-200/85 rounded-2xl sm:rounded-3xl p-4 sm:p-8 shadow-xs space-y-4 sm:space-y-6 max-w-xl">
               <div>
-                <h3 className="text-base font-semibold text-slate-900">Account & Data Settings</h3>
-                <p className="text-xs text-slate-500">Currently managing: <span className="font-bold text-slate-800">{activeAccount?.name}</span></p>
+                <h3 className="text-sm sm:text-base font-semibold text-slate-900">Account & Data Settings</h3>
+                <p className="text-[11px] sm:text-xs text-slate-500">Currently managing: <span className="font-bold text-slate-800">{activeAccount?.name}</span></p>
               </div>
               <button
                 onClick={handleSignOut}

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { X, CheckCircle2, AlertCircle } from 'lucide-react';
 
 const initialFormState = {
   asset: '',
@@ -23,16 +24,41 @@ const initialFormState = {
 
 export default function AddTradeModal({ isOpen, onClose, onAddTrade, initialDate }) {
   const [formData, setFormData] = useState(initialFormState);
+  const [rules, setRules] = useState([]);
+  const [ruleEvaluations, setRuleEvaluations] = useState({}); // { [ruleId]: { passed: boolean, breakReason: '' } }
 
-  // Reset or initialize form data whenever the modal opens
+  // Fetch persistent master rules and initialize form data whenever the modal opens
   useEffect(() => {
     if (isOpen) {
       setFormData({
         ...initialFormState,
         date: initialDate || new Date().toISOString().split('T')[0],
       });
+      fetchRules();
     }
   }, [isOpen, initialDate]);
+
+  const fetchRules = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('trading_rules')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      if (data) {
+        setRules(data);
+        // Default all rules to passed (checked) initially
+        const initialEvals = {};
+        data.forEach((r) => {
+          initialEvals[r.id] = { passed: true, breakReason: '' };
+        });
+        setRuleEvaluations(initialEvals);
+      }
+    } catch (err) {
+      console.error('Error fetching persistent trading rules:', err);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -41,21 +67,65 @@ export default function AddTradeModal({ isOpen, onClose, onAddTrade, initialDate
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
+  const handleRuleToggle = (ruleId, passed) => {
+    setRuleEvaluations((prev) => ({
+      ...prev,
+      [ruleId]: {
+        ...prev[ruleId],
+        passed,
+        breakReason: passed ? '' : prev[ruleId]?.breakReason || '',
+      },
+    }));
+  };
+
+  const handleReasonChange = (ruleId, breakReason) => {
+    setRuleEvaluations((prev) => ({
+      ...prev,
+      [ruleId]: {
+        ...prev[ruleId],
+        breakReason,
+      },
+    }));
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    onAddTrade(formData);
+
+    // Validate that if any rule is failed, a mandatory reason is filled out
+    for (const rule of rules) {
+      const evalData = ruleEvaluations[rule.id];
+      if (evalData && !evalData.passed && !evalData.breakReason.trim()) {
+        alert(`Mandatory Check: Please provide a reason why you broke the rule: "${rule.rule_text}"`);
+        return;
+      }
+    }
+
+    // Format rule evaluations array for the trade record
+    const formattedEvaluations = rules.map((rule) => ({
+      rule_id: rule.id,
+      rule_text: rule.rule_text,
+      passed: ruleEvaluations[rule.id]?.passed ?? true,
+      break_reason: ruleEvaluations[rule.id]?.breakReason || '',
+    }));
+
+    // Pass combined payload back up
+    onAddTrade({
+      ...formData,
+      ruleEvaluations: formattedEvaluations,
+    });
+
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 backdrop-blur-md p-3 sm:p-6 animate-fadeIn">
-      <div className="bg-white border border-slate-200/80 rounded-3xl shadow-2xl max-w-xl w-full p-6 overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-xs p-4 sm:p-6 animate-fadeIn">
+      <div className="bg-white border border-slate-200/80 rounded-3xl shadow-2xl max-w-xl w-full p-5 sm:p-6 overflow-hidden flex flex-col max-h-[90vh]">
         
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100 shrink-0">
+        <div className="flex items-center justify-between pb-3 sm:pb-4 border-b border-slate-100 shrink-0">
           <div>
-            <h3 className="text-base font-bold text-slate-900 tracking-tight">Log New Execution</h3>
-            <p className="text-xs text-slate-500">Record parameters for your trading journal.</p>
+            <h3 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">Log New Execution & Rules</h3>
+            <p className="text-[11px] sm:text-xs text-slate-500">Record parameters and verify discipline checklist.</p>
           </div>
           <button 
             onClick={onClose}
@@ -66,9 +136,9 @@ export default function AddTradeModal({ isOpen, onClose, onAddTrade, initialDate
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="overflow-y-auto space-y-4 pr-1 pt-4 flex-1">
+        <form onSubmit={handleSubmit} className="overflow-y-auto space-y-3.5 sm:space-y-4 pr-1 pt-3 sm:pt-4 flex-1">
           
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-semibold text-slate-600 mb-1">Asset</label>
               <input
@@ -76,7 +146,7 @@ export default function AddTradeModal({ isOpen, onClose, onAddTrade, initialDate
                 name="asset"
                 value={formData.asset}
                 onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400"
                 placeholder="e.g. XAUUSD, EURUSD"
                 required
               />
@@ -89,20 +159,20 @@ export default function AddTradeModal({ isOpen, onClose, onAddTrade, initialDate
                 name="date"
                 value={formData.date}
                 onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400"
                 required
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-semibold text-slate-600 mb-1">Position Type</label>
               <select
                 name="type"
                 value={formData.type}
                 onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400"
               >
                 <option value="Long">Long (Buy)</option>
                 <option value="Short">Short (Sell)</option>
@@ -115,7 +185,7 @@ export default function AddTradeModal({ isOpen, onClose, onAddTrade, initialDate
                 name="session"
                 value={formData.session}
                 onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400"
               >
                 <option value="London">London</option>
                 <option value="New York">New York</option>
@@ -125,14 +195,14 @@ export default function AddTradeModal({ isOpen, onClose, onAddTrade, initialDate
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-[11px] font-semibold text-slate-600 mb-1">Trend Direction</label>
               <select
                 name="trend"
                 value={formData.trend}
                 onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400"
               >
                 <option value="Bullish">Bullish</option>
                 <option value="Bearish">Bearish</option>
@@ -146,7 +216,7 @@ export default function AddTradeModal({ isOpen, onClose, onAddTrade, initialDate
                 name="zoneTimeframe"
                 value={formData.zoneTimeframe}
                 onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400"
               >
                 <option value="1m">1m</option>
                 <option value="5m">5m</option>
@@ -164,7 +234,7 @@ export default function AddTradeModal({ isOpen, onClose, onAddTrade, initialDate
                 name="zoneType"
                 value={formData.zoneType}
                 onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400"
               >
                 <option value="Bearish Zone">Bearish Zone</option>
                 <option value="Bullish Zone">Bullish Zone</option>
@@ -174,7 +244,7 @@ export default function AddTradeModal({ isOpen, onClose, onAddTrade, initialDate
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-semibold text-slate-600 mb-1">Risk Percentage (%)</label>
               <input
@@ -183,7 +253,7 @@ export default function AddTradeModal({ isOpen, onClose, onAddTrade, initialDate
                 name="riskPercentage"
                 value={formData.riskPercentage}
                 onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400"
                 placeholder="1"
                 required
               />
@@ -196,53 +266,96 @@ export default function AddTradeModal({ isOpen, onClose, onAddTrade, initialDate
                 name="pnl"
                 value={formData.pnl}
                 onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400"
                 placeholder="e.g. 150 or -50"
                 required
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <div>
-              <label className="block text-[10px] text-slate-400 mb-1">Entry Price</label>
+          <div>
+            <label className="block text-[10px] text-slate-400 mb-1">Price Levels & Targets</label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <input
                 type="text"
                 name="entryPrice"
                 value={formData.entryPrice}
                 onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none font-mono"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400 font-mono"
+                placeholder="Entry"
               />
-            </div>
-            <div>
-              <label className="block text-[10px] text-slate-400 mb-1">Exit Price</label>
               <input
                 type="text"
                 name="exitPrice"
                 value={formData.exitPrice}
                 onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none font-mono"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400 font-mono"
+                placeholder="Exit"
               />
-            </div>
-            <div>
-              <label className="block text-[10px] text-slate-400 mb-1">Stop Loss</label>
               <input
                 type="text"
                 name="slPrice"
                 value={formData.slPrice}
                 onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none font-mono"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400 font-mono"
+                placeholder="Stop Loss"
               />
-            </div>
-            <div>
-              <label className="block text-[10px] text-slate-400 mb-1">Take Profit</label>
               <input
                 type="text"
                 name="tpPrice"
                 value={formData.tpPrice}
                 onChange={handleChange}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none font-mono"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400 font-mono"
+                placeholder="Take Profit"
               />
+            </div>
+          </div>
+
+          {/* Persistent Trading Rules Verification Checklist */}
+          <div className="border-t border-slate-100 pt-3 space-y-2.5">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={15} className="text-slate-900" />
+              <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Master Rules Verification</h4>
+            </div>
+            <p className="text-[11px] text-slate-500">Check each rule followed. Unchecking requires a mandatory breakdown reason.</p>
+
+            <div className="space-y-2 bg-slate-50/70 p-3 rounded-2xl border border-slate-200/60 max-h-44 overflow-y-auto">
+              {rules.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-2">No active rules found. Add them in the Trading Rules menu tab.</p>
+              ) : (
+                rules.map((rule) => {
+                  const evalState = ruleEvaluations[rule.id] || { passed: true, breakReason: '' };
+                  return (
+                    <div key={rule.id} className="bg-white p-2.5 rounded-xl border border-slate-200/80 space-y-1.5">
+                      <label className="flex items-center justify-between cursor-pointer">
+                        <span className="text-xs font-semibold text-slate-800 pr-2">{rule.rule_text}</span>
+                        <input
+                          type="checkbox"
+                          checked={evalState.passed}
+                          onChange={(e) => handleRuleToggle(rule.id, e.target.checked)}
+                          className="w-4 h-4 accent-slate-900 rounded cursor-pointer"
+                        />
+                      </label>
+
+                      {!evalState.passed && (
+                        <div className="space-y-1 pt-1 animate-fadeIn">
+                          <div className="flex items-center gap-1 text-[10px] font-bold text-rose-600">
+                            <AlertCircle size={11} /> Rule Broken — Mandatory Breakdown Reason:
+                          </div>
+                          <input
+                            type="text"
+                            required
+                            value={evalState.breakReason}
+                            onChange={(e) => handleReasonChange(rule.id, e.target.value)}
+                            placeholder="Why was this rule broken on this setup?"
+                            className="w-full bg-rose-50/50 border border-rose-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
 
@@ -253,7 +366,7 @@ export default function AddTradeModal({ isOpen, onClose, onAddTrade, initialDate
               name="duration"
               value={formData.duration}
               onChange={handleChange}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400"
               placeholder="e.g. 45 mins, 3 hours"
             />
           </div>
@@ -264,14 +377,14 @@ export default function AddTradeModal({ isOpen, onClose, onAddTrade, initialDate
               name="thoughts"
               value={formData.thoughts}
               onChange={handleChange}
-              rows={3}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none resize-none"
+              rows={2}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-slate-400 resize-none"
               placeholder="How did you feel? Was execution aligned with your plan?"
             />
           </div>
 
           {/* Form Footer Action */}
-          <div className="pt-3 border-t border-slate-100 flex justify-end gap-2 shrink-0">
+          <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2 shrink-0">
             <button
               type="button"
               onClick={onClose}
@@ -281,7 +394,7 @@ export default function AddTradeModal({ isOpen, onClose, onAddTrade, initialDate
             </button>
             <button
               type="submit"
-              className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-xl text-xs font-semibold transition-colors"
+              className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-xl text-xs font-semibold transition-colors shadow-xs"
             >
               Save Execution
             </button>

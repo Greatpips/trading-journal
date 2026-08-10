@@ -1,8 +1,52 @@
 'use client';
 
-import { X, Trash2, ArrowUpRight, ArrowDownRight, Clock, ShieldAlert, Target, Plus } from 'lucide-react';
+import { X, Trash2, ArrowUpRight, ArrowDownRight, Clock, ShieldAlert, Target, Plus, CheckCircle2, XCircle } from 'lucide-react';
 
-export default function DayDetailsModal({ isOpen, date, trades, onClose, onDeleteTrade, onAddTradeForDate }) {
+interface TradeRuleEvaluation {
+  id: string;
+  rule_id: string;
+  rule_text: string;
+  passed: boolean;
+  break_reason?: string;
+}
+
+interface Trade {
+  id: string;
+  asset: string;
+  type: string;
+  trend: string;
+  zoneTimeframe?: string;
+  zone_timeframe?: string;
+  zoneType?: string;
+  zone_type?: string;
+  riskPercentage?: number;
+  risk_percentage?: number;
+  session: string;
+  duration?: string;
+  pnl: number;
+  entryPrice?: number;
+  entry_price?: number;
+  exitPrice?: number;
+  exit_price?: number;
+  slPrice?: number;
+  sl_price?: number;
+  tpPrice?: number;
+  tp_price?: number;
+  thoughts?: string;
+  date: string;
+  trade_rules_evaluation?: TradeRuleEvaluation[];
+}
+
+interface DayDetailsModalProps {
+  isOpen: boolean;
+  date: string | null;
+  trades: Trade[];
+  onClose: () => void;
+  onDeleteTrade: (id: string) => void;
+  onAddTradeForDate?: (dateStr: string) => void;
+}
+
+export default function DayDetailsModal({ isOpen, date, trades, onClose, onDeleteTrade, onAddTradeForDate }: DayDetailsModalProps) {
   if (!isOpen || !date) return null;
 
   const dayTrades = trades.filter(t => t.date === date);
@@ -17,7 +61,7 @@ export default function DayDetailsModal({ isOpen, date, trades, onClose, onDelet
         <div className="flex items-center justify-between pb-4 border-b border-slate-100 shrink-0">
           <div>
             <h3 className="text-base font-bold text-slate-900 tracking-tight">Executions Logged for {date}</h3>
-            <p className="text-xs text-slate-500">Complete breakdown of parameters, prices, and psychology notes.</p>
+            <p className="text-xs text-slate-500">Complete breakdown of parameters, prices, psychology notes, and rule compliance.</p>
           </div>
           <div className="flex items-center gap-2">
             <button 
@@ -60,6 +104,8 @@ export default function DayDetailsModal({ isOpen, date, trades, onClose, onDelet
           ) : (
             dayTrades.slice().reverse().map((t) => {
               const tradeWin = Number(t.pnl) >= 0;
+              const evaluations = t.trade_rules_evaluation || [];
+
               return (
                 <div key={t.id} className="p-5 rounded-2xl border border-slate-200/90 bg-white shadow-2xs space-y-4">
                   
@@ -135,6 +181,40 @@ export default function DayDetailsModal({ isOpen, date, trades, onClose, onDelet
                       </div>
                     </div>
                   </div>
+
+                  {/* Trading Rules Compliance Display */}
+                  {evaluations.length > 0 && (
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 space-y-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">Rules Checklist Audit:</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {evaluations.map((ev) => (
+                          <div 
+                            key={ev.id} 
+                            className={`p-2.5 rounded-xl text-xs border flex flex-col gap-1 ${
+                              ev.passed 
+                                ? 'bg-emerald-50/50 border-emerald-200/60 text-emerald-900' 
+                                : 'bg-rose-50/60 border-rose-200 text-rose-900'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between font-semibold">
+                              <span className="flex items-center gap-1.5 truncate pr-2">
+                                {ev.passed ? <CheckCircle2 size={14} className="text-emerald-600 shrink-0" /> : <XCircle size={14} className="text-rose-600 shrink-0" />}
+                                <span className="truncate">{ev.rule_text}</span>
+                              </span>
+                              <span className="shrink-0 text-[11px] font-bold">
+                                {ev.passed ? 'Followed' : 'Broken'}
+                              </span>
+                            </div>
+                            {!ev.passed && ev.break_reason && (
+                              <p className="text-[11px] text-rose-700 italic pl-5">
+                                Reason: "{ev.break_reason}"
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Trading Thoughts & Psychology */}
                   {t.thoughts && (
