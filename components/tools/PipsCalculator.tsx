@@ -233,7 +233,7 @@ export default function PipsCalculator() {
         <div className="space-y-1">
           <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">Total Pip Movement</span>
           <div className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <span className={results.pps >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+            <span className={results.pips >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
               {results.pips > 0 ? `+${results.pips}` : results.pips} Pips
             </span>
           </div>
